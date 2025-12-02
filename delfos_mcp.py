@@ -201,6 +201,98 @@ async def get_table_relationships() -> str:
     ]
     return "\n".join(rel_list)
 
+import uuid
+from datetime import datetime
+from typing import List, Dict
+
+@mcp.tool()
+async def insert_agent_output_batch(
+    user_id: str,
+    question: str,
+    results: List[Dict],
+    metric_name: str,
+    visual_hint: str
+) -> str:
+    """
+    Insert multiple rows of query results into agent_output table
+    
+    Args:
+        user_id (str): User identifier/email.
+        question (str): The natural language question asked by the user.
+        results (List[Dict]): List of result rows, each with keys:
+            - x_value (str): X-axis value
+            - y_value (float): Y-axis numeric value
+            - series (str, optional): Series name for grouping
+            - category (str, optional): Category name
+        metric_name (str): Name of the metric being measured.
+        visual_hint (str): Visualization type ('pie', 'bar', 'line', 'table').
+    
+    Returns:
+        str: Confirmation message with run_id and row count.
+    
+    Example:
+        results = [
+            {"x_value": "United States", "y_value": 123456.78, "category": "United States"},
+            {"x_value": "Canada", "y_value": 45678.90, "category": "Canada"}
+        ]
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    run_id = str(uuid.uuid4())
+    created_at = datetime.now()
+    
+    query = """
+        INSERT INTO [dbo].[agent_output]
+            ([run_id], [user_id], [question], [x_value], [y_value],
+             [series], [category], [metric_name], [visual_hint], [created_at])
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    
+    rows_inserted = 0
+    for row in results:
+        cursor.execute(query, (
+            run_id,
+            user_id,
+            question,
+            row.get("x_value"),
+            row.get("y_value"),
+            row.get("series"),
+            row.get("category"),
+            metric_name,
+            visual_hint,
+            created_at
+        ))
+        rows_inserted += 1
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    return f"Inserted {rows_inserted} rows successfully. run_id: {run_id}"
+
+@mcp.tool()
+async def generate_powerbi_url(run_id: str, visual_hint: str) -> str:
+    WORKSPACE_ID = os.getenv("WORKSPACE_ID")
+    REPORT_ID    = os.getenv("REPORT_ID")
+ 
+    VISUAL_PAGE_MAP = {
+        "linea": "Line",
+        "barras": "Bar",
+        "barras_agrupadas": "StackedBar",
+        "pie": "PieChart",
+    }
+ 
+    page_name = VISUAL_PAGE_MAP.get(visual_hint, "ReportSectionBarras")
+ 
+    url = (
+        f"https://app.powerbi.com/groups/{WORKSPACE_ID}/reports/{REPORT_ID}"
+        f"?pageName={page_name}"
+        f"&filter=agent_output/run_id eq '{run_id}'"
+    )
+ 
+    return url
+
 def main():
     try:
         logging.info("Starting MCP server...")
